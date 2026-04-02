@@ -18,9 +18,8 @@ MindWise 学生心理测评系统的前端管理平台，基于 React + TypeScri
 | 框架 | React 18 + TypeScript |
 | 构建 | Vite |
 | 样式 | Tailwind CSS |
-| 路由 | React Router v6 |
+| 路由 | React Router v7 |
 | 请求 | TanStack Query + axios |
-| UI 组件 | shadcn/ui |
 
 ## 快速开始
 
@@ -87,7 +86,7 @@ src/
 | `admin_teacher` | 查看所有学生数据 + 生成报告 |
 | `class_teacher` | 仅查看本班学生数据（需分配班级） |
 
-超级管理员账号由后端 `tools/seed_super_admin.py` 脚本创建。
+超级管理员账号由后端 `mindwise-api/tools/seed_super_admin.py` 脚本创建。
 
 ## 环境变量
 

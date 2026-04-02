@@ -83,3 +83,18 @@ export interface ReportGenerateResponse {
   weaknesses_analysis: IndicatorAnalysis[];
   improvement_suggestions: ImprovementSuggestion[];
 }
+
+export interface SavedIndicatorAnalysis {
+  indicator_id: number;
+  indicator_name: string;
+  analysis: string;
+  suggestion: string | null;
+  is_positive: boolean;
+}
+
+export interface ReportGetResponse {
+  report_id: number;
+  student_id: number;
+  exam_id: number;
+  indicators: SavedIndicatorAnalysis[];
+}
