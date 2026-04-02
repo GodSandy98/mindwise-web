@@ -3,7 +3,7 @@
 ## Project Overview
 
 React + TypeScript frontend for the MindWise student psychological assessment system.
-Consumes the [mindwise-api](https://github.com/GodSandy98/mindwise-api) FastAPI backend.
+Consumes the mindwise-api FastAPI backend.
 
 Teachers log in to view student scores, submit questionnaire answers, and generate LLM-based psychological reports.
 
@@ -31,7 +31,7 @@ VITE_API_BASE_URL=http://localhost:8000
 ## Architecture
 
 - **Entry point**: `src/main.tsx` — sets up QueryClient, Router, and renders `<App />`
-- **Routing**: `src/App.tsx` — React Router v6 routes with auth guards
+- **Routing**: `src/App.tsx` — React Router v7 routes with auth guards
 - **API layer**: `src/api/` — one file per domain; all calls go through `client.ts` (axios instance with JWT interceptor)
 - **Pages**: `src/pages/` — one file per route
 - **Components**: `src/components/` — shared UI (Navbar, ScoreBar, LevelBadge, etc.)
