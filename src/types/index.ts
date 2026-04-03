@@ -2,7 +2,7 @@ export interface Teacher {
   id: number;
   phone: string;
   name: string;
-  role: 'super_admin' | 'admin_teacher' | 'class_teacher';
+  role: 'super_admin' | 'admin_teacher' | 'psych_teacher' | 'class_teacher';
   class_id: number | null;
   is_active: boolean;
 }
@@ -97,4 +97,26 @@ export interface ReportGetResponse {
   student_id: number;
   exam_id: number;
   indicators: SavedIndicatorAnalysis[];
+}
+
+export interface IndicatorVersion {
+  version: number;
+  analysis: string | null;
+  suggestion: string | null;
+  is_current: boolean;
+  created_at: string; // ISO datetime string
+}
+
+export interface IndicatorHistory {
+  indicator_id: number;
+  indicator_name: string;
+  is_positive: boolean;
+  versions: IndicatorVersion[];
+}
+
+export interface IndicatorHistoryResponse {
+  report_id: number;
+  student_id: number;
+  exam_id: number;
+  indicators: IndicatorHistory[];
 }

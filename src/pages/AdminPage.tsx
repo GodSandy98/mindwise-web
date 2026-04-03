@@ -7,6 +7,7 @@ import { Teacher } from '../types';
 const ROLE_LABELS: Record<string, string> = {
   super_admin: '超级管理员',
   admin_teacher: '管理教师',
+  psych_teacher: '心理教师',
   class_teacher: '班主任',
 };
 
@@ -79,10 +80,11 @@ export default function AdminPage() {
               <label className="block text-sm text-gray-600 mb-1">角色</label>
               <select className="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
                 <option value="class_teacher">班主任</option>
+                <option value="psych_teacher">心理教师</option>
                 <option value="admin_teacher">管理教师</option>
               </select>
             </div>
-            {form.role === 'class_teacher' && (
+            {(form.role === 'class_teacher') && (
               <div>
                 <label className="block text-sm text-gray-600 mb-1">负责班级</label>
                 <select className="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" value={form.class_id} onChange={e => setForm({ ...form, class_id: e.target.value })}>
@@ -128,9 +130,10 @@ export default function AdminPage() {
                       <select
                         className="border rounded px-2 py-0.5 text-xs focus:outline-none"
                         value={t.role}
-                        onChange={e => changeRole.mutate({ id: t.id, role: e.target.value, class_id: e.target.value === 'admin_teacher' ? null : t.class_id })}
+                        onChange={e => changeRole.mutate({ id: t.id, role: e.target.value, class_id: e.target.value === 'class_teacher' ? t.class_id : null })}
                       >
                         <option value="class_teacher">班主任</option>
+                        <option value="psych_teacher">心理教师</option>
                         <option value="admin_teacher">管理教师</option>
                       </select>
                     )}
