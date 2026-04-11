@@ -3,15 +3,22 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getStudent } from '../api/students';
 import { getExams } from '../api/exams';
-import { generateReport, saveReport, getReport, getIndicatorHistory } from '../api/reports';
-import {
-  ReportGenerateResponse, ReportGetResponse, SavedIndicatorAnalysis,
-  IndicatorHistoryResponse, IndicatorVersion,
+import { generateReport, saveReport, getReport, getIndicatorHistory, exportSingleDocx } from '../api/reports';
+import type {
+  ReportGenerateResponse, ReportGetResponse, IndicatorAnalysis,
+  IndicatorHistoryResponse, IndicatorVersion, PersonaResult,
 } from '../types';
 import LevelBadge from '../components/LevelBadge';
 import { useAuth } from '../context/AuthContext';
 
 const CAN_GENERATE = ['super_admin', 'admin_teacher', 'psych_teacher'];
+const CAN_VIEW_TEACHER = ['super_admin', 'admin_teacher', 'psych_teacher'];
+
+const SYSTEM_LABELS: Record<string, string> = {
+  motivation: '动力系统',
+  regulation: '调控系统',
+  execution: '执行系统',
+};
 
 export default function ReportPage() {
   const { studentId } = useParams<{ studentId: string }>();
@@ -20,13 +27,14 @@ export default function ReportPage() {
   const { user } = useAuth();
 
   const canGenerate = CAN_GENERATE.includes(user?.role ?? '');
+  const canViewTeacher = CAN_VIEW_TEACHER.includes(user?.role ?? '');
 
   const [examId, setExamId] = useState<number | null>(null);
-  const [generatedReport, setGeneratedReport] = useState<ReportGenerateResponse | null>(null);
   const [draft, setDraft] = useState<ReportGenerateResponse | null>(null);
-  const [isEditingSaved, setIsEditingSaved] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const [viewMode, setViewMode] = useState<'student' | 'teacher'>('student');
+  const [exporting, setExporting] = useState(false);
 
   const { data: student } = useQuery({ queryKey: ['student', sid], queryFn: () => getStudent(sid) });
   const { data: exams = [] } = useQuery({ queryKey: ['exams'], queryFn: getExams });
@@ -42,7 +50,6 @@ export default function ReportPage() {
     retry: false,
   });
 
-  // 历史版本：仅在编辑模式且有已保存报告时加载
   const { data: history } = useQuery<IndicatorHistoryResponse>({
     queryKey: ['report-history', sid, examId],
     queryFn: () => getIndicatorHistory(sid, examId!),
@@ -53,9 +60,7 @@ export default function ReportPage() {
   const generate = useMutation({
     mutationFn: () => generateReport(sid, examId!),
     onSuccess: data => {
-      setGeneratedReport(data);
       setDraft(JSON.parse(JSON.stringify(data)));
-      setIsEditingSaved(false);
       setSaved(false);
       setError('');
     },
@@ -63,11 +68,22 @@ export default function ReportPage() {
   });
 
   const save = useMutation({
-    mutationFn: () => saveReport(draft!),
+    mutationFn: () => {
+      if (!draft) throw new Error('无草稿');
+      return saveReport({
+        student_id: draft.student_id,
+        exam_id: draft.exam_id,
+        persona_code: draft.persona.code,
+        motivation_level: draft.persona.code[0],
+        regulation_level: draft.persona.code[1],
+        execution_level: draft.persona.code[2],
+        summary: draft.summary ?? '',
+        strengths: draft.strengths,
+        weaknesses: draft.weaknesses,
+      });
+    },
     onSuccess: () => {
       setDraft(null);
-      setGeneratedReport(null);
-      setIsEditingSaved(false);
       setSaved(true);
       queryClient.invalidateQueries({ queryKey: ['report', sid, examId] });
       queryClient.invalidateQueries({ queryKey: ['report-history', sid, examId] });
@@ -76,74 +92,67 @@ export default function ReportPage() {
 
   function handleExamChange(newExamId: number) {
     setExamId(newExamId);
-    setGeneratedReport(null);
     setDraft(null);
-    setIsEditingSaved(false);
     setSaved(false);
     setError('');
   }
 
-  function startEditingSaved() {
-    if (!savedReport) return;
-    const positives = savedReport.indicators.filter(i => i.is_positive);
-    const negatives = savedReport.indicators.filter(i => !i.is_positive);
-    const converted: ReportGenerateResponse = {
-      student_id: savedReport.student_id,
-      exam_id: savedReport.exam_id,
-      strengths_analysis: positives.map(i => ({
-        indicator_name: i.indicator_name,
-        score_standardized: 0,
-        level: 'M' as const,
-        analysis: i.analysis ?? '',
-      })),
-      weaknesses_analysis: negatives.map(i => ({
-        indicator_name: i.indicator_name,
-        score_standardized: 0,
-        level: 'M' as const,
-        analysis: i.analysis ?? '',
-      })),
-      improvement_suggestions: negatives
-        .filter(i => !!i.suggestion)
-        .map(i => ({ indicator_name: i.indicator_name, suggestion: i.suggestion! })),
-    };
-    setDraft(JSON.parse(JSON.stringify(converted)));
-    setGeneratedReport(null);
-    setIsEditingSaved(true);
-    setSaved(false);
-  }
-
-  function cancelEditing() {
-    setDraft(null);
-    setIsEditingSaved(false);
-  }
-
-  function updateAnalysis(section: 'strengths_analysis' | 'weaknesses_analysis', index: number, value: string) {
+  function updateStrength(index: number, field: 'analysis' | 'analysis_teacher', value: string) {
     if (!draft) return;
-    setDraft({ ...draft, [section]: draft[section].map((item, i) => i === index ? { ...item, analysis: value } : item) });
+    setDraft({
+      ...draft,
+      strengths: draft.strengths.map((item, i) =>
+        i === index ? { ...item, [field]: value } : item
+      ),
+    });
   }
 
-  function updateSuggestion(index: number, value: string) {
+  function updateWeakness(index: number, field: 'analysis' | 'analysis_teacher' | 'suggestion', value: string) {
     if (!draft) return;
-    setDraft({ ...draft, improvement_suggestions: draft.improvement_suggestions.map((item, i) => i === index ? { ...item, suggestion: value } : item) });
+    setDraft({
+      ...draft,
+      weaknesses: draft.weaknesses.map((item, i) =>
+        i === index ? { ...item, [field]: value } : item
+      ),
+    });
   }
 
-  // 从历史版本中获取某指标的所有版本（version > 1 才有历史可看）
   function getVersionsForIndicator(name: string) {
     return history?.indicators.find(i => i.indicator_name === name)?.versions ?? [];
+  }
+
+  async function handleExport() {
+    if (!examId) return;
+    setExporting(true);
+    try {
+      const blob = await exportSingleDocx(sid, examId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${student?.name ?? sid}-报告.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setExporting(false);
+    }
   }
 
   const showDraft = !!draft;
   const showSaved = !draft && !!savedReport;
 
   return (
-    <div className="max-w-3xl mx-auto p-6">
+    <div className="max-w-4xl mx-auto p-6">
+      {/* Header */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-800">
-          {student ? `${student.name} 的心理报告` : '心理报告'}
+          {student ? `${student.name} 的心理测评报告` : '心理测评报告'}
         </h1>
         {student && <p className="text-sm text-gray-400 mt-1">{student.class_name}</p>}
       </div>
 
+      {/* Controls */}
       <div className="flex gap-3 mb-6 items-end flex-wrap">
         <div>
           <label className="block text-sm text-gray-600 mb-1">选择考试</label>
@@ -156,7 +165,7 @@ export default function ReportPage() {
           </select>
         </div>
 
-        {canGenerate && !isEditingSaved && (
+        {canGenerate && (
           <button
             onClick={() => generate.mutate()}
             disabled={generate.isLoading || !examId}
@@ -166,26 +175,14 @@ export default function ReportPage() {
           </button>
         )}
 
-        {canGenerate && showSaved && (
-          <button
-            onClick={startEditingSaved}
-            disabled={generate.isLoading}
-            className="border border-indigo-400 text-indigo-600 px-4 py-1.5 rounded text-sm hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            编辑报告
-          </button>
-        )}
-
         {showDraft && (
           <>
-            {isEditingSaved && (
-              <button
-                onClick={cancelEditing}
-                className="border border-gray-300 text-gray-600 px-4 py-1.5 rounded text-sm hover:bg-gray-50"
-              >
-                取消编辑
-              </button>
-            )}
+            <button
+              onClick={() => setDraft(null)}
+              className="border border-gray-300 text-gray-600 px-4 py-1.5 rounded text-sm hover:bg-gray-50"
+            >
+              取消
+            </button>
             <button
               onClick={() => save.mutate()}
               disabled={save.isLoading}
@@ -197,7 +194,39 @@ export default function ReportPage() {
         )}
 
         {saved && !showDraft && (
-          <span className="text-green-600 text-sm font-medium">✓ 已保存</span>
+          <span className="text-green-600 text-sm font-medium">已保存</span>
+        )}
+
+        {/* Export button — only when saved report exists and not in draft mode */}
+        {showSaved && !showDraft && (
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="border border-gray-300 text-gray-600 px-4 py-1.5 rounded text-sm hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            {exporting ? '导出中…' : '导出 Word'}
+          </button>
+        )}
+
+        {/* View mode toggle */}
+        {canViewTeacher && (showDraft || showSaved) && (
+          <div className="ml-auto flex rounded overflow-hidden border border-gray-300 text-sm">
+            <button
+              onClick={() => setViewMode('student')}
+              className={`px-3 py-1 ${viewMode === 'student' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              学生视角
+            </button>
+            <button
+              onClick={() => setViewMode('teacher')}
+              className={`px-3 py-1 ${viewMode === 'teacher' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              教师视角
+            </button>
+          </div>
         )}
       </div>
 
@@ -209,82 +238,159 @@ export default function ReportPage() {
 
       {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
 
-      {/* 可编辑草稿 */}
+      {/* Draft mode */}
       {showDraft && draft && (
         <div className="space-y-6">
           <div className="text-xs text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-3 py-2">
-            {isEditingSaved
-              ? '✏️ 编辑模式：修改完成后点击「确认并保存」，保存后恢复只读'
-              : '✏️ 以下为 AI 生成的初稿，可直接编辑，确认无误后点击「确认并保存」'}
+            以下为 AI 生成的报告，可直接编辑，确认无误后点击「确认并保存」
           </div>
 
-          <ReportSection title="优势指标分析">
-            {draft.strengths_analysis.map((item, i) => (
-              <EditableAnalysisCard
-                key={item.indicator_name}
-                color="green"
-                name={item.indicator_name}
-                level={isEditingSaved ? undefined : item.level}
-                score={isEditingSaved ? undefined : item.score_standardized}
-                value={item.analysis}
-                versions={getVersionsForIndicator(item.indicator_name)}
-                onChange={v => updateAnalysis('strengths_analysis', i, v)}
-              />
-            ))}
-          </ReportSection>
+          <PersonaCard persona={draft.persona} viewMode={viewMode} />
+          <SystemLevelsCard systemLevels={draft.system_levels} />
 
-          <ReportSection title="不足指标分析">
-            {draft.weaknesses_analysis.map((item, i) => (
-              <EditableAnalysisCard
-                key={item.indicator_name}
-                color="red"
-                name={item.indicator_name}
-                level={isEditingSaved ? undefined : item.level}
-                score={isEditingSaved ? undefined : item.score_standardized}
-                value={item.analysis}
-                versions={getVersionsForIndicator(item.indicator_name)}
-                onChange={v => updateAnalysis('weaknesses_analysis', i, v)}
-              />
-            ))}
-          </ReportSection>
+          {/* Summary */}
+          <div className="bg-white border rounded-lg p-4">
+            <label className="text-sm font-semibold text-gray-600 mb-2 block">综合概述</label>
+            <textarea
+              className="w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded px-3 py-2 leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              rows={4}
+              value={draft.summary ?? ''}
+              onChange={e => setDraft({ ...draft, summary: e.target.value })}
+            />
+          </div>
 
-          <ReportSection title="改进建议">
-            {draft.improvement_suggestions.map((item, i) => (
-              <EditableSuggestionCard
-                key={item.indicator_name}
-                name={item.indicator_name}
-                value={item.suggestion}
-                versions={getVersionsForIndicator(item.indicator_name)}
-                onChange={v => updateSuggestion(i, v)}
-              />
-            ))}
-          </ReportSection>
+          {/* Strengths */}
+          <section>
+            <h2 className="text-base font-semibold text-green-700 mb-3 flex items-center gap-2">
+              <span className="inline-block w-1.5 h-4 bg-green-500 rounded-full"></span>
+              优势亮点（得分最高的三项）
+            </h2>
+            <div className="space-y-3">
+              {draft.strengths.map((ind, idx) => (
+                <EditableIndicatorCard
+                  key={ind.indicator_id}
+                  indicator={ind}
+                  viewMode={viewMode}
+                  isWeakness={false}
+                  versions={getVersionsForIndicator(ind.indicator_name)}
+                  onChangeAnalysis={v => updateStrength(idx, viewMode === 'student' ? 'analysis' : 'analysis_teacher', v)}
+                  onChangeSuggestion={null}
+                />
+              ))}
+            </div>
+          </section>
+
+          {/* Weaknesses */}
+          <section>
+            <h2 className="text-base font-semibold text-amber-700 mb-3 flex items-center gap-2">
+              <span className="inline-block w-1.5 h-4 bg-amber-500 rounded-full"></span>
+              成长空间（得分最低的三项）
+            </h2>
+            <div className="space-y-3">
+              {draft.weaknesses.map((ind, idx) => (
+                <EditableIndicatorCard
+                  key={ind.indicator_id}
+                  indicator={ind}
+                  viewMode={viewMode}
+                  isWeakness={true}
+                  versions={getVersionsForIndicator(ind.indicator_name)}
+                  onChangeAnalysis={v => updateWeakness(idx, viewMode === 'student' ? 'analysis' : 'analysis_teacher', v)}
+                  onChangeSuggestion={v => updateWeakness(idx, 'suggestion', v)}
+                />
+              ))}
+            </div>
+          </section>
         </div>
       )}
 
-      {/* 只读已保存报告 */}
+      {/* Saved report readonly */}
       {showSaved && savedReport && (
         <div className="space-y-6">
           <p className="text-xs text-gray-400">
-            {canGenerate ? '已保存的报告，点击「编辑报告」修改或「重新生成」用 AI 重新生成' : '已保存的报告'}
+            {canGenerate ? '已保存的报告，点击「重新生成」刷新' : '已保存的报告'}
           </p>
-          <ReportSection title="优势指标分析">
-            {savedReport.indicators.filter(i => i.is_positive).map(item => (
-              <ReadonlyAnalysisCard key={item.indicator_name} color="green" name={item.indicator_name} analysis={item.analysis ?? ''} />
-            ))}
-          </ReportSection>
-          <ReportSection title="不足指标分析">
-            {savedReport.indicators.filter(i => !i.is_positive).map(item => (
-              <ReadonlyAnalysisCard key={item.indicator_name} color="red" name={item.indicator_name} analysis={item.analysis ?? ''} />
-            ))}
-          </ReportSection>
-          <ReportSection title="改进建议">
-            {savedReport.indicators
-              .filter((i): i is SavedIndicatorAnalysis & { suggestion: string } => !i.is_positive && !!i.suggestion)
-              .map(item => (
-                <ReadonlySuggestionCard key={item.indicator_name} name={item.indicator_name} suggestion={item.suggestion} />
-              ))}
-          </ReportSection>
+
+          {savedReport.persona && (
+            <PersonaCard persona={savedReport.persona} viewMode={viewMode} />
+          )}
+
+          {(savedReport.motivation_level || savedReport.regulation_level || savedReport.execution_level) && (
+            <div className="bg-white border rounded-lg p-4">
+              <h2 className="text-sm font-semibold text-gray-600 mb-3">三系统水平</h2>
+              <div className="flex gap-4">
+                {[
+                  { label: '动力', level: savedReport.motivation_level },
+                  { label: '调控', level: savedReport.regulation_level },
+                  { label: '执行', level: savedReport.execution_level },
+                ].filter(s => s.level).map(s => (
+                  <div key={s.label} className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">{s.label}</span>
+                    <LevelBadge level={s.level as 'H' | 'M' | 'L'} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {savedReport.summary && (
+            <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-4">
+              <p className="text-xs font-semibold text-indigo-500 mb-1">综合概述</p>
+              <p className="text-sm text-gray-700 leading-relaxed">{savedReport.summary}</p>
+            </div>
+          )}
+
+          {savedReport.indicators.length > 0 && (() => {
+            const strengths = savedReport.indicators.filter(i => i.is_positive);
+            const weaknesses = savedReport.indicators.filter(i => !i.is_positive);
+            return (
+              <>
+                {strengths.length > 0 && (
+                  <section>
+                    <h2 className="text-base font-semibold text-green-700 mb-3 flex items-center gap-2">
+                      <span className="inline-block w-1.5 h-4 bg-green-500 rounded-full"></span>
+                      优势亮点
+                    </h2>
+                    <div className="space-y-3">
+                      {strengths.map(item => (
+                        <div key={item.indicator_id} className="border border-green-100 bg-green-50 rounded-lg p-4">
+                          <p className="font-medium text-gray-800 mb-1">{item.indicator_name}</p>
+                          {item.analysis && (
+                            <p className="text-sm text-gray-600 leading-relaxed">
+                              {viewMode === 'teacher' ? item.analysis : item.analysis}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {weaknesses.length > 0 && (
+                  <section>
+                    <h2 className="text-base font-semibold text-amber-700 mb-3 flex items-center gap-2">
+                      <span className="inline-block w-1.5 h-4 bg-amber-500 rounded-full"></span>
+                      成长空间
+                    </h2>
+                    <div className="space-y-3">
+                      {weaknesses.map(item => (
+                        <div key={item.indicator_id} className="border border-amber-100 bg-amber-50 rounded-lg p-4">
+                          <p className="font-medium text-gray-800 mb-1">{item.indicator_name}</p>
+                          {item.analysis && (
+                            <p className="text-sm text-gray-600 leading-relaxed mb-2">{item.analysis}</p>
+                          )}
+                          {item.suggestion && (
+                            <p className="text-sm text-blue-600 leading-relaxed">
+                              <span className="font-medium">改进建议：</span>{item.suggestion}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
 
@@ -297,37 +403,119 @@ export default function ReportPage() {
   );
 }
 
-// ── 子组件 ────────────────────────────────────────────────
+// ── Sub-components ──────────────────────────────────────────
 
-function ReportSection({ title, children }: { title: string; children: React.ReactNode }) {
+function PersonaCard({ persona, viewMode }: { persona: PersonaResult; viewMode: 'student' | 'teacher' }) {
+  const label = viewMode === 'student' ? persona.student_label : persona.teacher_label;
+  const description = viewMode === 'student' ? persona.student_description : persona.teacher_description;
+
   return (
-    <section>
-      <h2 className="text-lg font-semibold text-gray-700 mb-3">{title}</h2>
-      <div className="space-y-3">{children}</div>
-    </section>
+    <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-lg p-5">
+      <div className="flex items-center gap-3 mb-3">
+        <span className="text-2xl">
+          {persona.code[0] === 'H' ? '🔥' : persona.code[0] === 'M' ? '⚡' : '🌱'}
+        </span>
+        <div>
+          <h2 className="text-lg font-bold text-indigo-800">{label}</h2>
+          <span className="text-xs text-indigo-400 font-mono">{persona.code}</span>
+        </div>
+      </div>
+      <p className="text-sm text-gray-700 leading-relaxed">{description}</p>
+    </div>
   );
 }
 
-/** 历史版本折叠面板 */
-function VersionHistory({ versions, type, onUse }: {
+function SystemLevelsCard({ systemLevels }: { systemLevels: { system: string; avg_z: number; level: string }[] }) {
+  const order = ['motivation', 'regulation', 'execution'];
+  const sorted = [...systemLevels].sort((a, b) => order.indexOf(a.system) - order.indexOf(b.system));
+
+  return (
+    <div className="bg-white border rounded-lg p-4">
+      <h2 className="text-sm font-semibold text-gray-600 mb-3">三系统水平</h2>
+      <div className="grid grid-cols-3 gap-4">
+        {sorted.map(s => (
+          <div key={s.system} className="text-center">
+            <p className="text-xs text-gray-400 mb-1">{SYSTEM_LABELS[s.system] || s.system}</p>
+            <LevelBadge level={s.level as 'H' | 'M' | 'L'} />
+            <p className="text-xs text-gray-400 mt-1">z = {s.avg_z.toFixed(2)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EditableIndicatorCard({
+  indicator, viewMode, isWeakness, versions, onChangeAnalysis, onChangeSuggestion,
+}: {
+  indicator: IndicatorAnalysis;
+  viewMode: 'student' | 'teacher';
+  isWeakness: boolean;
+  versions: IndicatorVersion[];
+  onChangeAnalysis: (v: string) => void;
+  onChangeSuggestion: ((v: string) => void) | null;
+}) {
+  const analysis = viewMode === 'student' ? indicator.analysis : indicator.analysis_teacher;
+  const suggestion = indicator.suggestion ?? '';
+  const borderColor = isWeakness ? 'bg-amber-50 border-amber-100' : 'bg-green-50 border-green-100';
+
+  return (
+    <div className={`border rounded-lg p-4 ${borderColor}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="font-medium text-gray-800">{indicator.indicator_name}</span>
+        <LevelBadge level={indicator.level} />
+        <span className="text-xs text-gray-400 ml-auto">
+          原始 {indicator.score_raw.toFixed(2)} · z = {indicator.score_standardized.toFixed(2)}
+        </span>
+      </div>
+
+      <label className="text-xs text-gray-500 mb-1 block">分析</label>
+      <textarea
+        className="w-full text-sm text-gray-700 bg-white border border-gray-200 rounded px-3 py-2 leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300 mb-1"
+        rows={3}
+        value={analysis}
+        onChange={e => onChangeAnalysis(e.target.value)}
+      />
+      <VersionHistory versions={versions} type="analysis" currentValue={analysis} onUse={onChangeAnalysis} />
+
+      {isWeakness && onChangeSuggestion && (
+        <>
+          <label className="text-xs text-gray-500 mb-1 block mt-2">改进建议</label>
+          <textarea
+            className="w-full text-sm text-gray-700 bg-white border border-gray-200 rounded px-3 py-2 leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            rows={2}
+            value={suggestion}
+            onChange={e => onChangeSuggestion(e.target.value)}
+          />
+          <VersionHistory versions={versions} type="suggestion" currentValue={suggestion} onUse={onChangeSuggestion} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function VersionHistory({ versions, type, currentValue, onUse }: {
   versions: IndicatorVersion[];
   type: 'analysis' | 'suggestion';
+  currentValue: string;
   onUse: (text: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  // 过滤掉当前版本（已在 textarea 中显示），只显示历史版本
-  const historical = versions.filter(v => !v.is_current);
+  const historical = versions.filter(v => {
+    const text = type === 'analysis' ? v.analysis : v.suggestion;
+    return (text ?? '') !== currentValue;
+  });
   if (historical.length === 0) return null;
 
   return (
-    <div className="mt-2">
+    <div className="mt-1">
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
         className="text-xs text-gray-400 hover:text-indigo-500 flex items-center gap-1"
       >
         <span>{open ? '▲' : '▼'}</span>
-        历史版本（{historical.length} 条）
+        历史版本（{historical.length}）
       </button>
       {open && (
         <div className="mt-2 space-y-2 border-l-2 border-gray-100 pl-3">
@@ -352,73 +540,6 @@ function VersionHistory({ versions, type, onUse }: {
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-function EditableAnalysisCard({ color, name, level, score, value, versions, onChange }: {
-  color: 'green' | 'red';
-  name: string;
-  level?: 'H' | 'M' | 'L';
-  score?: number;
-  value: string;
-  versions: IndicatorVersion[];
-  onChange: (v: string) => void;
-}) {
-  const cls = color === 'green' ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100';
-  return (
-    <div className={`border rounded-lg p-4 ${cls}`}>
-      <div className="flex items-center gap-2 mb-2">
-        <span className="font-medium text-gray-800">{name}</span>
-        {level && <LevelBadge level={level} />}
-        {score !== undefined && <span className="text-xs text-gray-400 ml-auto">{score.toFixed(2)}</span>}
-      </div>
-      <textarea
-        className="w-full text-sm text-gray-700 bg-white border border-gray-200 rounded px-3 py-2 leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"
-        rows={4}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-      />
-      <VersionHistory versions={versions} type="analysis" onUse={onChange} />
-    </div>
-  );
-}
-
-function EditableSuggestionCard({ name, value, versions, onChange }: {
-  name: string;
-  value: string;
-  versions: IndicatorVersion[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-      <p className="text-sm font-medium text-blue-700 mb-2">{name}</p>
-      <textarea
-        className="w-full text-sm text-gray-700 bg-white border border-gray-200 rounded px-3 py-2 leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"
-        rows={3}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-      />
-      <VersionHistory versions={versions} type="suggestion" onUse={onChange} />
-    </div>
-  );
-}
-
-function ReadonlyAnalysisCard({ color, name, analysis }: { color: 'green' | 'red'; name: string; analysis: string }) {
-  const cls = color === 'green' ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100';
-  return (
-    <div className={`border rounded-lg p-4 ${cls}`}>
-      <p className="font-medium text-gray-800 mb-1">{name}</p>
-      <p className="text-sm text-gray-600 leading-relaxed">{analysis}</p>
-    </div>
-  );
-}
-
-function ReadonlySuggestionCard({ name, suggestion }: { name: string; suggestion: string }) {
-  return (
-    <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-      <p className="text-sm font-medium text-blue-700 mb-1">{name}</p>
-      <p className="text-sm text-gray-600 leading-relaxed">{suggestion}</p>
     </div>
   );
 }

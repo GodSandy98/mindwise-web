@@ -5,10 +5,14 @@ import { getExam } from '../api/exams';
 import { getStudents } from '../api/students';
 import { getIndicators } from '../api/indicators';
 import ScoreBar from '../components/ScoreBar';
+import { useAuth } from '../context/AuthContext';
+
+const CAN_COMPUTE = ['super_admin', 'admin_teacher'];
 
 export default function ExamScoresPage() {
   const { id } = useParams<{ id: string }>();
   const examId = Number(id);
+  const { user } = useAuth();
 
   const { data: exam } = useQuery({ queryKey: ['exam', examId], queryFn: () => getExam(examId) });
   const { data: students = [] } = useQuery({ queryKey: ['students'], queryFn: getStudents });
@@ -34,13 +38,15 @@ export default function ExamScoresPage() {
           <h1 className="text-2xl font-bold text-gray-800">{exam?.name ?? '考试得分'}</h1>
           <p className="text-sm text-gray-400 mt-0.5">全班标准化得分总览</p>
         </div>
-        <button
-          onClick={() => compute.mutate()}
-          disabled={compute.isLoading}
-          className="bg-indigo-600 text-white px-4 py-2 rounded text-sm hover:bg-indigo-700 disabled:opacity-50"
-        >
-          {compute.isLoading ? '计算中…' : '重新计算得分'}
-        </button>
+        {CAN_COMPUTE.includes(user?.role ?? '') && (
+          <button
+            onClick={() => compute.mutate()}
+            disabled={compute.isLoading}
+            className="bg-indigo-600 text-white px-4 py-2 rounded text-sm hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {compute.isLoading ? '计算中…' : '重新计算得分'}
+          </button>
+        )}
       </div>
 
       {isLoading && <p className="text-gray-400">加载中…</p>}
@@ -74,9 +80,12 @@ export default function ExamScoresPage() {
           </table>
         </div>
       )}
-      {!isLoading && !scores && (
+      {!isLoading && scores && scores.results.length === 0 && (
         <div className="text-center py-16 text-gray-400">
-          <p className="mb-4">暂无得分数据，请先点击「重新计算得分」</p>
+          <p className="mb-4">
+            暂无得分数据
+            {CAN_COMPUTE.includes(user?.role ?? '') ? '，请先点击「重新计算得分」' : '，请联系管理教师进行计算'}
+          </p>
         </div>
       )}
     </div>
