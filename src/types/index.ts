@@ -23,6 +23,8 @@ export interface Exam {
 export interface Class {
   id: number;
   name: string;
+  is_active: boolean;
+  graduated_at: string | null;
 }
 
 export interface Indicator {
@@ -65,29 +67,57 @@ export interface AnswerSubmitResponse {
 }
 
 export interface IndicatorAnalysis {
+  indicator_id: number;
   indicator_name: string;
+  score_raw: number;
   score_standardized: number;
   level: 'H' | 'M' | 'L';
-  analysis: string;
+  system: string;
+  analysis: string;            // student-facing (LLM-generated)
+  analysis_teacher: string;    // teacher-facing (LLM-generated)
+  suggestion?: string | null;  // only present for weaknesses
 }
 
-export interface ImprovementSuggestion {
-  indicator_name: string;
-  suggestion: string;
+export interface SystemLevelResult {
+  system: string;
+  avg_z: number;
+  level: 'H' | 'M' | 'L';
+}
+
+export interface PersonaResult {
+  code: string;
+  teacher_label: string;
+  teacher_description: string;
+  student_label: string;
+  student_description: string;
 }
 
 export interface ReportGenerateResponse {
   student_id: number;
   exam_id: number;
-  strengths_analysis: IndicatorAnalysis[];
-  weaknesses_analysis: IndicatorAnalysis[];
-  improvement_suggestions: ImprovementSuggestion[];
+  persona: PersonaResult;
+  system_levels: SystemLevelResult[];
+  summary: string;                  // LLM综合概述，学生口吻
+  strengths: IndicatorAnalysis[];   // top 3
+  weaknesses: IndicatorAnalysis[];  // bottom 3 (with suggestions)
+}
+
+export interface ReportSaveRequest {
+  student_id: number;
+  exam_id: number;
+  persona_code: string;
+  motivation_level: string;
+  regulation_level: string;
+  execution_level: string;
+  summary: string;
+  strengths: IndicatorAnalysis[];
+  weaknesses: IndicatorAnalysis[];
 }
 
 export interface SavedIndicatorAnalysis {
   indicator_id: number;
   indicator_name: string;
-  analysis: string;
+  analysis: string | null;
   suggestion: string | null;
   is_positive: boolean;
 }
@@ -96,6 +126,11 @@ export interface ReportGetResponse {
   report_id: number;
   student_id: number;
   exam_id: number;
+  persona: PersonaResult | null;
+  motivation_level: string | null;
+  regulation_level: string | null;
+  execution_level: string | null;
+  summary: string | null;
   indicators: SavedIndicatorAnalysis[];
 }
 

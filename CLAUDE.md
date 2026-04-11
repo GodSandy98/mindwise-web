@@ -78,8 +78,8 @@ Standardized scores are bucketed into three levels displayed throughout the UI:
 
 | Level | Range | Color |
 |-------|-------|-------|
-| H (High) | z ≥ 1.0 | Red |
-| M (Medium) | -1.0 < z < 1.0 | Yellow |
-| L (Low) | z ≤ -1.0 | Green |
+| H (High) | z ≥ 0.67 | Green |
+| M (Medium) | -0.67 < z < 0.67 | Yellow |
+| L (Low) | z ≤ -0.67 | Red |
 
 This logic lives in a shared utility — do not duplicate it per component.

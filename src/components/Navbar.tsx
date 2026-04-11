@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 const ROLE_LABELS: Record<string, string> = {
   super_admin: '超级管理员',
   admin_teacher: '管理教师',
+  psych_teacher: '心理教师',
   class_teacher: '班主任',
 };
 
@@ -15,7 +16,7 @@ export default function Navbar() {
   const links = [
     { to: '/students', label: '学生' },
     { to: '/exams', label: '考试' },
-    ...(user?.role === 'super_admin' ? [{ to: '/admin', label: '教师管理' }] : []),
+    ...(user?.role === 'super_admin' ? [{ to: '/admin', label: '系统管理' }] : []),
   ];
 
   function handleLogout() {

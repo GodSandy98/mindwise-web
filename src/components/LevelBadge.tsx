@@ -1,7 +1,7 @@
 const config = {
-  H: { label: '优', className: 'bg-green-100 text-green-800' },
-  M: { label: '中', className: 'bg-yellow-100 text-yellow-800' },
-  L: { label: '弱', className: 'bg-red-100 text-red-800' },
+  H: { label: '优势', className: 'bg-green-100 text-green-800' },
+  M: { label: '中等', className: 'bg-yellow-100 text-yellow-800' },
+  L: { label: '待提升', className: 'bg-red-100 text-red-800' },
 };
 
 export default function LevelBadge({ level }: { level: 'H' | 'M' | 'L' }) {
