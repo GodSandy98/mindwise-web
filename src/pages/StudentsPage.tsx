@@ -1,18 +1,34 @@
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { getStudents } from '../api/students';
 import { getClasses } from '../api/classes';
 
 export default function StudentsPage() {
-  const [classFilter, setClassFilter] = useState<number | 'all'>('all');
-  const [search, setSearch] = useState('');
+  const [params, setParams] = useSearchParams();
+  const classFilter = params.get('class') ?? 'all';
+  const search = params.get('search') ?? '';
+
+  function setClassFilter(val: string) {
+    setParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (val === 'all') next.delete('class'); else next.set('class', val);
+      return next;
+    }, { replace: true });
+  }
+
+  function setSearch(val: string) {
+    setParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (!val) next.delete('search'); else next.set('search', val);
+      return next;
+    }, { replace: true });
+  }
 
   const { data: students = [], isLoading } = useQuery({ queryKey: ['students'], queryFn: getStudents });
   const { data: classes = [] } = useQuery({ queryKey: ['classes'], queryFn: getClasses });
 
   const filtered = students.filter(s => {
-    if (classFilter !== 'all' && s.class_id !== classFilter) return false;
+    if (classFilter !== 'all' && s.class_id !== Number(classFilter)) return false;
     if (search && !s.name.includes(search)) return false;
     return true;
   });
@@ -34,7 +50,7 @@ export default function StudentsPage() {
         <select
           className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
           value={classFilter}
-          onChange={e => setClassFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+          onChange={e => setClassFilter(e.target.value)}
         >
           <option value="all">全部班级</option>
           {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -62,18 +78,12 @@ export default function StudentsPage() {
                       {s.class_name}
                     </span>
                   </td>
-                  <td className="px-4 py-3 flex gap-2">
-                    <Link
-                      to={`/students/${s.id}`}
-                      className="text-xs px-2.5 py-1 rounded-full font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
-                    >
-                      得分详情
-                    </Link>
+                  <td className="px-4 py-3">
                     <Link
                       to={`/reports/${s.id}`}
-                      className="text-xs px-2.5 py-1 rounded-full font-medium bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors"
+                      className="text-xs px-2.5 py-1 rounded-full font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
                     >
-                      心理报告
+                      查看详情
                     </Link>
                   </td>
                 </tr>
