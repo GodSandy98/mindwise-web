@@ -38,6 +38,7 @@ export interface StudentReportStatus {
   class_id: number;
   class_name: string;
   has_report: boolean;
+  data_changed: boolean;  // true = scores changed after report was built (regeneration is meaningful)
 }
 
 export const getStudentReportStatus = (examId: number, classId?: number) => {
@@ -57,6 +58,17 @@ export const getBatchJob = (jobId: number) =>
 
 export const listBatchJobs = (examId: number) =>
   client.get<BatchJobSummary[]>(`/reports/batch-jobs?exam_id=${examId}`).then(r => r.data);
+
+export interface BatchJobFull extends BatchJobStatus {
+  exam_id: number;
+  exam_name: string;
+  student_ids: number[];
+  students: { student_id: number; student_name: string }[];
+  created_at: string | null;
+}
+
+export const listAllBatchJobs = () =>
+  client.get<BatchJobFull[]>('/reports/batch-jobs-all').then(r => r.data);
 
 export const exportSingleDocx = (studentId: number, examId: number) =>
   client.get(`/reports/student/${studentId}/export-docx?exam_id=${examId}`, { responseType: 'blob' }).then(r => r.data);

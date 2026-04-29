@@ -1,25 +1,43 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { getExams } from '../api/exams';
 import {
-  batchGenerateReports, getBatchJob, listBatchJobs, batchExportDocx,
+  batchGenerateReports, batchExportDocx,
   getStudentReportStatus,
 } from '../api/reports';
-import type { BatchJobStatus, BatchJobSummary, StudentReportStatus } from '../api/reports';
+import type { StudentReportStatus } from '../api/reports';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 
 const CAN_BATCH_GENERATE = ['super_admin', 'admin_teacher', 'psych_teacher'];
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: '排队中', running: '生成中', done: '已完成', failed: '失败',
-};
-const STATUS_COLOR: Record<string, string> = {
-  pending: 'text-gray-500 bg-gray-50',
-  running: 'text-blue-600 bg-blue-50',
-  done: 'text-green-600 bg-green-50',
-  failed: 'text-red-600 bg-red-50',
-};
+// ── Generate warnings helper ──────────────────────────────────
+
+function GenerateWarnings({ selected, students }: { selected: Set<number>; students: StudentReportStatus[] }) {
+  const selectedStudents = [...selected].map(id => students.find(s => s.student_id === id)).filter(Boolean) as StudentReportStatus[];
+  const staleCount = selectedStudents.filter(s => s.has_report && s.data_changed).length;
+  const unchangedCount = selectedStudents.filter(s => s.has_report && !s.data_changed).length;
+  if (staleCount === 0 && unchangedCount === 0) return null;
+  return (
+    <>
+      {staleCount > 0 && (
+        <div className="px-5 py-2 bg-amber-50 border-t border-amber-100">
+          <p className="text-xs text-amber-700">
+            已选中 {staleCount} 名数据已更新的学生，其旧报告将被 LLM 重新生成并覆盖。
+          </p>
+        </div>
+      )}
+      {unchangedCount > 0 && (
+        <div className="px-5 py-2 bg-red-50 border-t border-red-100">
+          <p className="text-xs text-red-600">
+            已选中 {unchangedCount} 名「报告最新」的学生——其数据自上次生成后未发生变化，重新生成将消耗 Token 但不会产生新内容。建议取消选中这些学生。
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
 
 // ── Student selection modal ───────────────────────────────────
 
@@ -41,11 +59,17 @@ function SelectStudentsModal({
     queryFn: () => getStudentReportStatus(examId),
   });
 
-  // For export: default filter to has_report and pre-select those students
   useEffect(() => {
-    if (mode === 'export' && students.length > 0) {
+    if (students.length === 0) return;
+    if (mode === 'export') {
+      // Export: default filter + pre-select students with reports
       setFilter('has_report');
       setSelected(new Set(students.filter(s => s.has_report).map(s => s.student_id)));
+    } else {
+      // Generate: default-select only students with no report OR whose data changed
+      setSelected(new Set(
+        students.filter(s => !s.has_report || s.data_changed).map(s => s.student_id)
+      ));
     }
   }, [students, mode]);
 
@@ -148,39 +172,40 @@ function SelectStudentsModal({
             <div key={className}>
               <p className="text-xs font-semibold text-gray-400 mb-2">{className}</p>
               <div className="space-y-1">
-                {classStudents.map(s => (
-                  <label
-                    key={s.student_id}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-lg ${mode === 'export' && !s.has_report ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-50 cursor-pointer'}`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 accent-indigo-600 flex-shrink-0"
-                      checked={selected.has(s.student_id)}
-                      onChange={() => toggle(s.student_id)}
-                      disabled={mode === 'export' && !s.has_report}
-                    />
-                    <span className="flex-1 text-sm text-gray-800">{s.student_name}</span>
-                    {s.has_report ? (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600 font-medium">已有报告</span>
-                    ) : (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-400">未生成</span>
-                    )}
-                  </label>
-                ))}
+                {classStudents.map(s => {
+                    const isDisabled = mode === 'export' && !s.has_report;
+                    return (
+                      <label
+                        key={s.student_id}
+                        className={`flex items-center gap-3 px-3 py-2 rounded-lg ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-50 cursor-pointer'}`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 accent-indigo-600 flex-shrink-0"
+                          checked={selected.has(s.student_id)}
+                          onChange={() => toggle(s.student_id)}
+                          disabled={isDisabled}
+                        />
+                        <span className="flex-1 text-sm text-gray-800">{s.student_name}</span>
+                        {!s.has_report && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-400">未生成</span>
+                        )}
+                        {s.has_report && s.data_changed && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 font-medium">数据已更新</span>
+                        )}
+                        {s.has_report && !s.data_changed && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600 font-medium">报告最新</span>
+                        )}
+                      </label>
+                    );
+                  })}
               </div>
             </div>
           ))}
         </div>
 
-        {/* Warning for re-generation (generate mode only) */}
-        {mode === 'generate' && [...selected].some(id => students.find(s => s.student_id === id)?.has_report) && (
-          <div className="px-5 py-2 bg-amber-50 border-t border-amber-100">
-            <p className="text-xs text-amber-700">
-              已选中部分有报告的学生，这些学生的报告将被 LLM 重新生成并覆盖。
-            </p>
-          </div>
-        )}
+        {/* Warnings for generate mode */}
+        {mode === 'generate' && <GenerateWarnings selected={selected} students={students} />}
 
         {/* Footer */}
         <div className="px-5 py-3 border-t flex items-center justify-between">
@@ -198,66 +223,25 @@ function SelectStudentsModal({
   );
 }
 
-// ── Per-exam job panel ────────────────────────────────────────
+// ── Per-exam action panel ─────────────────────────────────────
 
 function JobPanel({ examId, examName }: { examId: number; examName: string }) {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const canGenerate = CAN_BATCH_GENERATE.includes(user?.role ?? '');
 
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [activeJobId, setActiveJobId] = useState<number | null>(null);
-  const [jobStatus, setJobStatus] = useState<BatchJobStatus | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [exporting, setExporting] = useState(false);
-
-  const { data: recentJobs } = useQuery<BatchJobSummary[]>({
-    queryKey: ['batch-jobs', examId],
-    queryFn: () => listBatchJobs(examId),
-    enabled: canGenerate,
-    retry: false,
-  });
-
-  useEffect(() => {
-    if (!recentJobs || recentJobs.length === 0) return;
-    const last = recentJobs[0];
-    if (last.status === 'pending' || last.status === 'running') {
-      setActiveJobId(last.job_id);
-    } else {
-      setJobStatus({
-        job_id: last.job_id, status: last.status,
-        total: last.total, success: last.success, failed: last.failed,
-        errors: [], updated_at: last.created_at,
-      });
-    }
-  }, [recentJobs]);
-
-  useEffect(() => {
-    if (!activeJobId) return;
-    const poll = async () => {
-      try {
-        const status = await getBatchJob(activeJobId);
-        setJobStatus(status);
-        if (status.status === 'done' || status.status === 'failed') {
-          clearInterval(pollRef.current!);
-          pollRef.current = null;
-          setActiveJobId(null);
-        }
-      } catch {
-        clearInterval(pollRef.current!);
-        pollRef.current = null;
-      }
-    };
-    poll();
-    pollRef.current = setInterval(poll, 5000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [activeJobId]);
 
   const startJob = useMutation({
     mutationFn: (studentIds: number[]) => batchGenerateReports(examId, studentIds),
     onSuccess: (data) => {
-      setJobStatus({ job_id: data.job_id, status: 'pending', total: data.total, success: 0, failed: 0, errors: [], updated_at: null });
-      setActiveJobId(data.job_id);
+      showToast(
+        `已为 ${data.total} 名学生提交生成任务，`,
+        '/tasks',
+        '任务中心',
+      );
     },
   });
 
@@ -284,11 +268,6 @@ function JobPanel({ examId, examName }: { examId: number; examName: string }) {
     }
   }
 
-  const isRunning = jobStatus?.status === 'pending' || jobStatus?.status === 'running';
-  const progress = jobStatus && jobStatus.total > 0
-    ? Math.round(((jobStatus.success + jobStatus.failed) / jobStatus.total) * 100)
-    : 0;
-
   if (!canGenerate) return null;
 
   return (
@@ -312,14 +291,14 @@ function JobPanel({ examId, examName }: { examId: number; examName: string }) {
         />
       )}
 
-      <div className="mt-3 space-y-2">
+      <div className="mt-3">
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setShowGenerateModal(true)}
-            disabled={isRunning}
+            disabled={startJob.isLoading}
             className="text-xs px-3 py-1.5 rounded-full font-medium bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors disabled:opacity-50"
           >
-            {isRunning ? '生成中…' : '生成报告'}
+            {startJob.isLoading ? '提交中…' : '生成报告'}
           </button>
           <button
             onClick={() => setShowExportModal(true)}
@@ -332,35 +311,6 @@ function JobPanel({ examId, examName }: { examId: number; examName: string }) {
             {exporting ? '导出中…' : '批量导出 Word'}
           </button>
         </div>
-
-        {jobStatus && (
-          <div className={`rounded-md px-3 py-2 text-xs ${STATUS_COLOR[jobStatus.status] ?? 'bg-gray-50 text-gray-600'}`}>
-            <div className="flex items-center justify-between mb-1">
-              <span className="font-medium">
-                {STATUS_LABEL[jobStatus.status]}
-                {' · '}共 {jobStatus.total} 人，成功 {jobStatus.success} 人
-                {jobStatus.failed > 0 && `，失败 ${jobStatus.failed} 人`}
-              </span>
-              {isRunning && <span className="text-blue-400 tabular-nums">{progress}%</span>}
-            </div>
-            {isRunning && (
-              <div className="w-full bg-blue-100 rounded-full h-1.5 mt-1">
-                <div
-                  className="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-            )}
-            {jobStatus.errors.length > 0 && (
-              <ul className="mt-1.5 space-y-0.5 text-red-600">
-                {jobStatus.errors.slice(0, 3).map((err, i) => (
-                  <li key={i}>{err.student_name || `学生${err.student_id}`}：{err.error}</li>
-                ))}
-                {jobStatus.errors.length > 3 && <li>…还有 {jobStatus.errors.length - 3} 条错误</li>}
-              </ul>
-            )}
-          </div>
-        )}
       </div>
     </>
   );

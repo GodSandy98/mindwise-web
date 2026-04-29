@@ -1,17 +1,18 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
 import Sidebar from './components/Sidebar';
 import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import StudentsPage from './pages/StudentsPage';
-import StudentDetailPage from './pages/StudentDetailPage';
 import ExamsPage from './pages/ExamsPage';
 import SubmitAnswersPage from './pages/SubmitAnswersPage';
 import ExamScoresPage from './pages/ExamScoresPage';
 import ReportPage from './pages/ReportPage';
 import AdminPage from './pages/AdminPage';
+import TaskCenterPage from './pages/TaskCenterPage';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -29,11 +30,11 @@ function AppRoutes() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/" element={<Navigate to="/students" replace />} />
         <Route path="/students" element={<ProtectedRoute><StudentsPage /></ProtectedRoute>} />
-        <Route path="/students/:id" element={<ProtectedRoute><StudentDetailPage /></ProtectedRoute>} />
         <Route path="/exams" element={<ProtectedRoute><ExamsPage /></ProtectedRoute>} />
         <Route path="/exams/:id/submit" element={<ProtectedRoute><SubmitAnswersPage /></ProtectedRoute>} />
         <Route path="/exams/:id/scores" element={<ProtectedRoute><ExamScoresPage /></ProtectedRoute>} />
         <Route path="/reports/:studentId" element={<ProtectedRoute><ReportPage /></ProtectedRoute>} />
+        <Route path="/tasks" element={<ProtectedRoute><TaskCenterPage /></ProtectedRoute>} />
         <Route path="/admin" element={
           <ProtectedRoute>
             {user?.role === 'super_admin' ? <AdminPage /> : <Navigate to="/students" replace />}
@@ -50,7 +51,9 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
-          <AppRoutes />
+          <ToastProvider>
+            <AppRoutes />
+          </ToastProvider>
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>

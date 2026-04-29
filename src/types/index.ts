@@ -31,6 +31,8 @@ export interface Indicator {
   id: number;
   name: string;
   system: string | null;
+  parent_id: number | null;
+  is_leaf: number;
 }
 
 export interface IndicatorScore {
